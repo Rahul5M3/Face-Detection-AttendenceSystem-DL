@@ -213,6 +213,7 @@ def main():
         frameEmbeddings = [embedding.tolist() if isinstance(embedding, np.ndarray) else embedding for embedding in frameEmbeddings]
 
         res=db.employee.insert_one({"name":emp_name, "_id":emp_id, "embeddings":frameEmbeddings})
+        res=db.empAttendence.insert_one({"name":emp_name, "_id":emp_id, "attendence":0})
 
         if res.inserted_id:
             print("Sucessfully Inserted ID : ", res.inserted_id)
@@ -247,7 +248,9 @@ def main():
                 bestScore = max_sim
                 bestMatch = document["_id"]
 
-        print(f"Best match: {bestMatch} with similarity score: {bestScore}")        
+        print(f"Best match: {bestMatch} with similarity score: {bestScore}")   
+
+        res=db.empAttendence.update_one({'_id':bestMatch},{'$inc':{'attendence':1}})     
 
         # db.empAttendence.find_one({})
     
