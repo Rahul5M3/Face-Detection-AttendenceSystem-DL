@@ -6,8 +6,15 @@ import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 import tensorflow as tf
+from pymongo import MongoClient
+from scipy.spatial.distance import cdist
 
+def mongoDB_connection():
+    client = MongoClient("mongodb://localhost:27017/")
+    db = client["employee_attendence"]
 
+    print("MongoDB connected successfully!")
+    return db
 
 @register_keras_serializable()
 class FaceDetector(Model):
@@ -186,16 +193,65 @@ def store_embeddings(efficientnetModel, frames4):
         framesEmbeddings.append(face)
     return framesEmbeddings    
 
-
+def normalize_embeddings(embeddings):
+    return embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
 
 def main():
-    model = load_model("../Model/modelFaceDetection.keras", custom_objects={"FaceDetector": FaceDetector}, compile=False)
-    cropFrames=empProcess(model)
-    efficientnetModel=load_facenet()
+    db=mongoDB_connection()
 
-    frameEmbeddings=store_embeddings(efficientnetModel, cropFrames)
+    action=input('s for storing and f for finding')
 
-    print(frameEmbeddings)
+    if action=='s':
+        emp_name=input('Employee Name')
+        emp_id=input('Employee Id')
+
+        model = load_model("../Model/modelFaceDetection.keras", custom_objects={"FaceDetector": FaceDetector}, compile=False)
+        cropFrames=empProcess(model)
+        efficientnetModel=load_facenet()
+        frameEmbeddings=store_embeddings(efficientnetModel, cropFrames)
+
+        frameEmbeddings = [embedding.tolist() if isinstance(embedding, np.ndarray) else embedding for embedding in frameEmbeddings]
+
+        res=db.employee.insert_one({"name":emp_name, "_id":emp_id, "embeddings":frameEmbeddings})
+
+        if res.inserted_id:
+            print("Sucessfully Inserted ID : ", res.inserted_id)
+        else :
+            print("Employee insertion failed")
+
+    elif action=='f':
+        model = load_model("../Model/modelFaceDetection.keras", custom_objects={"FaceDetector": FaceDetector}, compile=False)
+        cropFrames=empProcess(model)
+        efficientnetModel=load_facenet()
+        frameEmbeddings=store_embeddings(efficientnetModel, cropFrames)  
+
+        frameEmbeddings = [np.array(embedding, dtype=np.float32) if isinstance(embedding, list) else embedding for embedding in frameEmbeddings]
+        frameEmbeddings = np.array(frameEmbeddings, dtype=np.float32)   
+        frameEmbeddings = frameEmbeddings.squeeze(1)
+        frameEmbeddings=normalize_embeddings(frameEmbeddings)
+
+        bestScore=float('-inf')
+        bestMatch=None
+
+        for document in db.employee.find({},{'embeddings':1, '_id':1}):
+            embedding = [np.array(embedding, dtype=np.float32) if isinstance(embedding, list) else embedding for embedding in document["embeddings"]]
+            embedding=np.array(embedding, dtype=np.float32)
+            embedding = embedding.squeeze(1)
+            embedding=normalize_embeddings(embedding)
+
+            similarity_matrix = 1 - cdist(frameEmbeddings, embedding, metric='cosine')
+
+            max_sim = np.max(similarity_matrix)
+
+            if max_sim > bestScore:  
+                bestScore = max_sim
+                bestMatch = document["_id"]
+
+        print(f"Best match: {bestMatch} with similarity score: {bestScore}")        
+
+        # db.empAttendence.find_one({})
+    
+         
 
 if __name__ == "__main__":
     main()
