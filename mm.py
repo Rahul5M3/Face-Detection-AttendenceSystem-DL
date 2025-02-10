@@ -8,6 +8,7 @@ import numpy as np
 import tensorflow as tf
 from pymongo import MongoClient
 from scipy.spatial.distance import cdist
+from datetime import datetime
 
 def mongoDB_connection():
     client = MongoClient("mongodb://localhost:27017/")
@@ -201,6 +202,16 @@ def main():
 
     action=input('s for storing and f for finding')
 
+    current_year = str(datetime.now().year)
+    months = {
+        "January": 31, "February": 28, "March": 31, "April": 30,
+        "May": 31, "June": 30, "July": 31, "August": 31,
+         "September": 30, "October": 31, "November": 30, "December": 31
+    }
+
+    if int(current_year) % 4 == 0 and (int(current_year) % 100 != 0 or int(current_year) % 400 == 0):
+        months["February"] = 29
+
     if action=='s':
         emp_name=input('Employee Name')
         emp_id=input('Employee Id')
@@ -213,7 +224,13 @@ def main():
         frameEmbeddings = [embedding.tolist() if isinstance(embedding, np.ndarray) else embedding for embedding in frameEmbeddings]
 
         res=db.employee.insert_one({"name":emp_name, "_id":emp_id, "embeddings":frameEmbeddings})
-        res=db.empAttendence.insert_one({"name":emp_name, "_id":emp_id, "attendence":0})
+        # res=db.empAttendence.insert_one({"name":emp_name, "_id":emp_id,})
+
+        new_doc = {
+            "_id": res.inserted_id,
+            current_year: {month: [[] for _ in range(days)] for month, days in months.items()}
+        }
+        db.empAttendence.insert_one(new_doc)
 
         if res.inserted_id:
             print("Sucessfully Inserted ID : ", res.inserted_id)
@@ -250,9 +267,50 @@ def main():
 
         print(f"Best match: {bestMatch} with similarity score: {bestScore}")   
 
-        res=db.empAttendence.update_one({'_id':bestMatch},{'$inc':{'attendence':1}})     
+        # attendence part
 
-        # db.empAttendence.find_one({})
+        # current_year = str(datetime.now().year)
+        # months = {
+        #     "January": 31, "February": 28, "March": 31, "April": 30,
+        #     "May": 31, "June": 30, "July": 31, "August": 31,
+        #     "September": 30, "October": 31, "November": 30, "December": 31
+        # }
+
+        # if int(current_year) % 4 == 0 and (int(current_year) % 100 != 0 or int(current_year) % 400 == 0):
+        #     months["February"] = 29
+
+        doc = db.empAttendence.find_one({"_id": bestMatch})
+        
+        if doc:
+            update_fields = {} 
+
+            if current_year not in doc:
+                update_fields[current_year] = {month: [[] for _ in range(days)] for month, days in months.items()}  
+            else :
+                for month, days in months.items():
+                    if month not in doc[current_year]:
+                        update_fields[f"{current_year}.{month}"] = [[] for _ in range(days)]   
+
+            if update_fields:
+                db.empAttendence.update_one(
+                    {"_id": "some_unique_id"},
+                    {"$set": update_fields}
+                ) 
+        else :
+            new_doc = {
+                "_id": bestMatch,
+                current_year: {month: [[] for _ in range(days)] for month, days in months.items()}
+            }
+            db.empAttendence.insert_one(new_doc)       
+
+        current_month = datetime.now().strftime("%B")
+        current_day = datetime.now().day - 1
+
+        db.empAttendence.update_one(
+            {"_id": bestMatch},
+            {"$push": {f"{current_year}.{current_month}.{current_day}": {'status':'present'}}}
+        )                 
+
     
          
 
